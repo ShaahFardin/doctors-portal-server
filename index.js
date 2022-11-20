@@ -4,6 +4,7 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
 const jwt = require('jsonwebtoken')
 const port = process.env.PORT || 5000;
+const stripe = require('stripe')(process.env.STRIPE_SECRET)
 
 const app = express();
 
@@ -51,6 +52,7 @@ const appointmentOptionCollection = client.db('DoctorsPortal').collection('Appoi
 const bookingsCollection = client.db('DoctorsPortal').collection('bookings')
 const usersCollection = client.db('DoctorsPortal').collection('users')
 const doctorsCollection = client.db('DoctorsPortal').collection('doctors')
+const paymentCollection = client.db('DoctorsPortal').collection('payment')
 
 
 const verifyAdmin = async (req, res, next) => {
@@ -146,6 +148,15 @@ app.get('/bookings', verifyJWT, async (req, res) => {
     res.send(bookings)
 })
 
+// get id specific booking
+app.get('/bookings/:id', async (req, res) => {
+    const id = req.params.id;
+    const query = { _id: ObjectId(id) }
+    const booking = await bookingsCollection.findOne(query);
+    res.send(booking)
+
+})
+
 // Create new user data from sign up
 app.post('/users', async (req, res) => {
     const user = req.body
@@ -214,11 +225,65 @@ app.delete('/doctors/:id', verifyJWT, verifyAdmin, async (req, res) => {
 })
 
 
+// temporary solution to update price field on appointment options
+// app.get('/addprice', async(req, res)=>{
+//     const filter = {};
+//     const options = {upsert: true};
+//     const updatedDoc = {
+//         $set: {
+//             price : 99
+//         }
+//     }
+//     const result = await appointmentOptionCollection.updateMany(filter, updatedDoc, options);
+//     res.send(result)
+// })
+
+
+
+
+
+// payement by stripe
+app.post('/create-payment-intent', async(req, res)=>{
+    const booking = req.body;
+    const price = booking.price;
+    const amount = price * 100;
+
+    const payementIntent = await stripe.paymentIntents.create({
+        currency: 'usd',
+        amount: amount,
+        'payment_method_types': [
+            'card'
+        ]
+    })
+    res.send({
+        clientSecret : payementIntent.client_secret,
+    })
+})
+
+
+
+// store payment info
+app.post('/payments', async(req, res)=>{
+    const payment = req.body;
+    const result = await paymentCollection.insertOne(payment)
+    const id = payment.bookingId
+    const filter = {_id: ObjectId(id)}
+    const updatedDoc = {
+        $set: {
+            paid : true,
+            transactionId : payment.transactionId
+        }
+    }
+    const updateResult = await bookingsCollection.updateOne(filter, updatedDoc)
+    res.send(result)
+})
+
+
 app.get('/', (req, res) => {
     res.send("Doctors portal server is running")
 });
 app.listen(port, () => console.log(`Doctors portal server is running on ${port}`))
 
-app.get('/haha', ( req, res) => {
+app.get('/haha', (req, res) => {
     res.json({ result: true })
 })
